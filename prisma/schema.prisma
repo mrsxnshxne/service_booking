@@ -1,0 +1,405 @@
+// Résa database schema — see docs/data-model.md and docs/openapi.yaml.
+// Conventions:
+// - DB entity `User` is exposed as `Manager` in the API.
+// - All money columns are Decimal (never floats).
+// - Date ranges (rates, blocks, holds, bookings) are end-exclusive: [start_date, end_date).
+// - Deliberate FK exceptions (must survive purges): BlockedPeriod.booking_id,
+//   Booking.hold_slot_id, EventLog.actor_id / resource_id are plain UUID columns.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+  runtime  = "bun"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Enums ─────────────────────────────────────────────
+
+enum BlockSource {
+  manual
+  ical_airbnb
+  ical_booking
+  booking_confirmed
+}
+
+enum BookingStatus {
+  pending
+  confirmed
+  cancelled
+  refunded
+}
+
+enum BookingSource {
+  direct
+  airbnb
+  booking
+}
+
+enum PaymentType {
+  deposit
+  balance
+  full
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
+  refunded
+}
+
+enum IcalSource {
+  airbnb
+  booking
+}
+
+enum IcalSyncStatus {
+  success
+  error
+  pending
+}
+
+enum EventCategory {
+  auth
+  booking
+  payment
+  property
+  sync
+  widget
+}
+
+enum EventLevel {
+  info
+  warning
+  error
+}
+
+enum ActorType {
+  manager
+  system
+  webhook
+}
+
+// ── Accounts & roles ──────────────────────────────────
+
+model User {
+  id                String    @id @default(uuid()) @db.Uuid
+  name              String
+  email             String    @unique
+  email_verified    Boolean   @default(false)
+  image             String?
+  phone             String?
+  two_fa_secret     String?
+  stripe_account_id String?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+  deleted_at        DateTime?
+
+  roles      UserRole[]
+  properties Property[]
+  sessions   Session[]
+  accounts   Account[]
+
+  @@map("users")
+}
+
+model Session {
+  id         String   @id @default(uuid())
+  expires_at DateTime
+  token      String   @unique
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  ip_address String?
+  user_agent String?
+  user_id    String   @db.Uuid
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Account {
+  id                         String    @id @default(uuid())
+  account_id                 String
+  provider_id                String
+  user_id                    String    @db.Uuid
+  access_token               String?
+  refresh_token              String?
+  id_token                   String?
+  access_token_expires_at    DateTime?
+  refresh_token_expires_at   DateTime?
+  scope                      String?
+  password                   String?
+  created_at                 DateTime  @default(now())
+  updated_at                 DateTime  @updatedAt
+  user                       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("accounts")
+}
+
+model Verification {
+  id         String    @id @default(uuid())
+  identifier String
+  value      String
+  expires_at DateTime
+  created_at DateTime? @default(now())
+  updated_at DateTime? @updatedAt
+
+  @@map("verifications")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  created_at  DateTime @default(now())
+
+  user_roles UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  id          String   @id @default(uuid()) @db.Uuid
+  user_id     String   @db.Uuid
+  role_id     String   @db.Uuid
+  assigned_at DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [role_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, role_id])
+  @@map("user_roles")
+}
+
+// ── Properties ────────────────────────────────────────
+
+model Property {
+  id           String    @id @default(uuid()) @db.Uuid
+  user_id      String    @db.Uuid
+  name         String
+  description  String?
+  address      String
+  city         String
+  zip_code     String
+  country      String
+  max_capacity Int
+  nb_bedrooms  Int?
+  nb_bathrooms Int?
+  active       Boolean   @default(true)
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  deleted_at   DateTime?
+
+  user            User            @relation(fields: [user_id], references: [id])
+  photos          PropertyPhoto[]
+  rates           Rate[]
+  blocked_periods BlockedPeriod[]
+  hold_slots      HoldSlot[]
+  bookings        Booking[]
+  widget_config   WidgetConfig?
+  ical_syncs      ICalSync[]
+
+  @@index([user_id])
+  @@map("properties")
+}
+
+model PropertyPhoto {
+  id          String   @id @default(uuid()) @db.Uuid
+  property_id String   @db.Uuid
+  storage_url String
+  order       Int
+  created_at  DateTime @default(now())
+
+  property Property @relation(fields: [property_id], references: [id], onDelete: Cascade)
+
+  @@index([property_id, order])
+  @@map("property_photos")
+}
+
+// ── Pricing ───────────────────────────────────────────
+
+model Rate {
+  id                   String   @id @default(uuid()) @db.Uuid
+  property_id          String   @db.Uuid
+  name                 String
+  base_price_per_night Decimal  @db.Decimal(10, 2)
+  start_date           DateTime @db.Date
+  end_date             DateTime @db.Date
+  is_high_season       Boolean  @default(false)
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  property       Property       @relation(fields: [property_id], references: [id], onDelete: Cascade)
+  discount_rules DiscountRule[]
+
+  @@index([property_id, start_date, end_date])
+  @@map("rates")
+}
+
+model DiscountRule {
+  id                  String  @id @default(uuid()) @db.Uuid
+  rate_id             String  @db.Uuid
+  min_nights          Int
+  max_nights          Int?
+  discount_percentage Decimal @db.Decimal(5, 2)
+
+  rate Rate @relation(fields: [rate_id], references: [id], onDelete: Cascade)
+
+  @@index([rate_id])
+  @@map("discount_rules")
+}
+
+// ── Availability ──────────────────────────────────────
+
+model BlockedPeriod {
+  id          String      @id @default(uuid()) @db.Uuid
+  property_id String      @db.Uuid
+  // No FK on purpose: must survive booking purges (spec).
+  booking_id  String?     @db.Uuid
+  start_date  DateTime    @db.Date
+  end_date    DateTime    @db.Date
+  source      BlockSource
+  notes       String?
+  created_at  DateTime    @default(now())
+
+  property Property @relation(fields: [property_id], references: [id], onDelete: Cascade)
+
+  @@index([property_id, start_date, end_date])
+  @@map("blocked_periods")
+}
+
+model HoldSlot {
+  id                       String   @id @default(uuid()) @db.Uuid
+  property_id              String   @db.Uuid
+  start_date               DateTime @db.Date
+  end_date                 DateTime @db.Date
+  stripe_payment_intent_id String?
+  expires_at               DateTime
+  created_at               DateTime @default(now())
+
+  property Property @relation(fields: [property_id], references: [id], onDelete: Cascade)
+
+  @@index([property_id, start_date, end_date])
+  @@index([expires_at])
+  @@map("hold_slots")
+}
+
+// ── Clients & bookings ────────────────────────────────
+
+model Client {
+  id         String    @id @default(uuid()) @db.Uuid
+  last_name  String
+  first_name String
+  email      String    @unique
+  phone      String?
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  deleted_at DateTime?
+
+  bookings Booking[]
+
+  @@map("clients")
+}
+
+model Booking {
+  id                 String        @id @default(uuid()) @db.Uuid
+  // Nullable on purpose: set to NULL on permanent purge of property/client (spec).
+  property_id        String?       @db.Uuid
+  client_id          String?       @db.Uuid
+  // No FK on purpose: expired holds are purged by a background job.
+  hold_slot_id       String?       @db.Uuid
+  check_in           DateTime      @db.Date
+  check_out          DateTime      @db.Date
+  nb_guests          Int
+  total_amount       Decimal       @db.Decimal(10, 2)
+  deposit_amount     Decimal       @db.Decimal(10, 2)
+  status             BookingStatus @default(pending)
+  source             BookingSource @default(direct)
+  external_reference String?
+  created_at         DateTime      @default(now())
+  updated_at         DateTime      @updatedAt
+
+  property Property? @relation(fields: [property_id], references: [id], onDelete: SetNull)
+  client   Client?   @relation(fields: [client_id], references: [id], onDelete: SetNull)
+  payments Payment[]
+
+  @@index([property_id, check_in, check_out])
+  @@index([client_id])
+  @@index([status])
+  @@map("bookings")
+}
+
+model Payment {
+  id                       String        @id @default(uuid()) @db.Uuid
+  booking_id               String        @db.Uuid
+  stripe_payment_intent_id String
+  amount                   Decimal       @db.Decimal(10, 2)
+  type                     PaymentType
+  status                   PaymentStatus @default(pending)
+  created_at               DateTime      @default(now())
+
+  // onDelete: Restrict — payments are never deleted (spec).
+  booking Booking @relation(fields: [booking_id], references: [id], onDelete: Restrict)
+
+  @@index([booking_id])
+  @@index([stripe_payment_intent_id])
+  @@map("payments")
+}
+
+// ── Widget ────────────────────────────────────────────
+
+model WidgetConfig {
+  id          String   @id @default(uuid()) @db.Uuid
+  property_id String   @unique @db.Uuid
+  language    String   @default("fr")
+  custom_css  String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  property Property @relation(fields: [property_id], references: [id], onDelete: Cascade)
+
+  @@map("widget_configs")
+}
+
+// ── iCal sync ─────────────────────────────────────────
+
+model ICalSync {
+  id               String          @id @default(uuid()) @db.Uuid
+  property_id      String          @db.Uuid
+  ical_url         String
+  source           IcalSource
+  last_sync_at     DateTime?
+  last_sync_status IcalSyncStatus?
+  error_message    String?
+  created_at       DateTime        @default(now())
+
+  property Property @relation(fields: [property_id], references: [id], onDelete: Cascade)
+
+  @@index([property_id])
+  @@map("ical_syncs")
+}
+
+// ── Audit log ─────────────────────────────────────────
+
+model EventLog {
+  id            String        @id @default(uuid()) @db.Uuid
+  category      EventCategory
+  event         String
+  level         EventLevel
+  // No FKs on purpose: logs must survive deletion of any entity (spec).
+  actor_id      String?       @db.Uuid
+  actor_type    ActorType?
+  resource_id   String?       @db.Uuid
+  resource_type String?
+  payload       Json?
+  error_message String?
+  created_at    DateTime      @default(now())
+
+  @@index([category, level])
+  @@index([resource_id])
+  @@index([created_at])
+  @@map("event_logs")
+}
