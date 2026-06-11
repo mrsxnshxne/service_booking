@@ -2,8 +2,12 @@ import express from "express"
 import { errorHandler } from "./middleware/error"
 import { availabilityRouter, holdSlotsRouter } from "./routes/availability"
 import { bookingsRouter } from "./routes/bookings"
+import { webhookHandler } from "./routes/payments"
 
 const app = express()
+
+// Webhook needs the raw body for Stripe signature verification — mount before express.json()
+app.post("/api/v1/payments/webhook", express.raw({ type: "application/json" }), webhookHandler)
 
 app.use(express.json())
 

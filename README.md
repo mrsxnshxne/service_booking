@@ -28,3 +28,41 @@ bunx prisma generate
 bun run dev          # listens on PORT (default 3001)
 bun test
 ```
+
+## To test payment
+
+### Requirements
+
+Install the [Stripe CLI](https://stripe.com/docs/stripe-cli).
+
+### Setup
+
+Add your Stripe keys to `.env`:
+
+```
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...   # printed by `stripe listen` on first run
+```
+
+### Flow
+
+1. Start the gateway (port 3000) and this service (port 3001).
+
+2. Start the Stripe webhook forwarder — targets the **gateway**, which proxies to this service:
+   ```sh
+   stripe listen --forward-to localhost:3000/api/v1/payments/webhook
+   ```
+   Copy the `whsec_...` secret printed and paste it into `.env` as `STRIPE_WEBHOOK_SECRET`.
+
+3. Create a payment:
+   ```http
+   POST /api/v1/bookings/<booking_id>/payments
+   { "type": "deposit" }
+   ```
+   Returns `{ client_secret, ... }`.
+
+4. Simulate a successful payment:
+   ```sh
+   stripe trigger payment_intent.succeeded
+   ```
+   The webhook updates the payment to `succeeded` and the booking to `confirmed`.
