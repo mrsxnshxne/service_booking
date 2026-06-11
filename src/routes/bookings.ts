@@ -1,4 +1,5 @@
 import { Router } from "express"
+import Stripe from "stripe"
 import { z } from "zod"
 import { prisma } from "../db"
 import { gatewayAuth } from "../middleware/gateway-auth"
@@ -7,6 +8,8 @@ import { DomainError } from "../domain/errors"
 import { estimateStay } from "../domain/pricing"
 import { nbNights } from "../domain/dates"
 import type { Booking, Client, Rate, DiscountRule, Prisma } from "../../generated/prisma/client"
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "")
 
 type BookingWithRelations = Prisma.BookingGetPayload<{ include: { client: true; property: true } }>
 type BookingWithClient = Prisma.BookingGetPayload<{ include: { client: true } }>
@@ -191,4 +194,54 @@ bookingsRouter.patch("/:id", gatewayAuth, validate(bookingUpdateSchema), async (
 		include: { client: true },
 	})) as BookingWithClient
 	res.json(serializeBooking(updated))
+})
+
+const paymentCreateSchema = z.object({
+	type: z.enum(["deposit", "balance", "full"]),
+})
+
+bookingsRouter.post("/:id/payments", validate(paymentCreateSchema), async (req, res) => {
+	const booking = await prisma.booking.findUnique({ where: { id: req.params.id as string } })
+	if (!booking) throw new DomainError("not_found", "Booking not found")
+	if (booking.status === "cancelled" || booking.status === "refunded") {
+		throw new DomainError("invalid_payment_transition", "Cannot create a payment for a cancelled or refunded booking")
+	}
+
+	const { type } = req.body as z.infer<typeof paymentCreateSchema>
+
+	const existing = await prisma.payment.findFirst({
+		where: { booking_id: booking.id, type, status: { in: ["pending", "succeeded"] } },
+	})
+	if (existing) throw new DomainError("payment_already_completed", "A payment of this type is already pending or succeeded")
+
+	const total = Number(booking.total_amount)
+	const deposit = Number(booking.deposit_amount)
+	const amount =
+		type === "deposit" ? deposit
+		: type === "balance" ? Math.round((total - deposit) * 100) / 100
+		: total
+
+	const intent = await stripe.paymentIntents.create({
+		amount: Math.round(amount * 100),
+		currency: "eur",
+		metadata: { booking_id: booking.id, payment_type: type },
+	})
+
+	const payment = await prisma.payment.create({
+		data: {
+			booking_id: booking.id,
+			stripe_payment_intent_id: intent.id,
+			amount,
+			type,
+			status: "pending",
+		},
+	})
+
+	res.status(201).json({
+		id: payment.id,
+		client_secret: intent.client_secret,
+		amount: Number(payment.amount),
+		type: payment.type,
+		status: payment.status,
+	})
 })
