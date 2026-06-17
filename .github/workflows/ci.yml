@@ -168,12 +168,19 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   # Job 4 — DEPLOY
   # Runs only on direct pushes to main, after both tests and quality pass.
-  # In a real environment this would SSH into the server and run:
-  #   docker pull <image> && docker-compose up -d
-  # Here it is simulated so the pipeline is complete without a target server.
+  #
+  # Required GitHub secrets (Settings → Secrets → Actions):
+  #   DEPLOY_HOST      — server IP or hostname
+  #   DEPLOY_USER      — SSH username (e.g. deploy)
+  #   DEPLOY_SSH_KEY   — private SSH key (RSA/Ed25519); add the public key to
+  #                      ~/.ssh/authorized_keys on the server
+  #
+  # Required on the server:
+  #   - Docker installed and running
+  #   - /srv/resa/.env file with DATABASE_URL, STRIPE_* variables
   # ────────────────────────────────────────────────────────────────────────────
   deploy:
-    name: "Deploy — production (simulated)"
+    name: "Deploy — production"
     needs: [tests, quality]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -183,35 +190,48 @@ jobs:
       packages: read
 
     steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Simulate deployment to production server
+      # Pass the image reference and a GHCR read token to the remote session
+      # via appleboy/ssh-action's `envs` mechanism so they are never echoed
+      # in plain text in the workflow logs.
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.0
         env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
-        run: |
-          echo "=============================================="
-          echo "  DEPLOYMENT — SIMULATION"
-          echo "=============================================="
-          echo ""
-          echo "  Commit  : ${{ github.sha }}"
-          echo "  Branch  : ${{ github.ref_name }}"
-          echo "  Image   : $IMAGE"
-          echo ""
-          echo "  Commands that would run on the server:"
-          echo ""
-          echo "    ssh deploy@prod-server \\"
-          echo "      'docker pull $IMAGE && \\"
-          echo "       docker-compose -f /srv/resa/docker-compose.yml \\"
-          echo "         up -d --no-deps service_booking && \\"
-          echo "       docker image prune -f'"
-          echo ""
-          echo "  Health-check (simulated):"
-          echo "    curl -sf http://prod-server:3001/health → 200 OK"
-          echo ""
-          echo "  Deployment successful (simulated)"
-          echo "=============================================="
+          ACTOR: ${{ github.actor }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: 22
+          envs: GHCR_TOKEN,IMAGE,ACTOR
+          script: |
+            set -e
+
+            echo "==> Authenticating to GHCR"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+            echo "==> Pulling image $IMAGE"
+            docker pull "$IMAGE"
+
+            echo "==> Stopping previous container (if any)"
+            docker stop service_booking 2>/dev/null || true
+            docker rm   service_booking 2>/dev/null || true
+
+            echo "==> Starting new container"
+            docker run -d \
+              --name service_booking \
+              --restart unless-stopped \
+              -p 3001:3001 \
+              --env-file /srv/resa/.env \
+              "$IMAGE"
+
+            echo "==> Cleaning up dangling images"
+            docker image prune -f
+
+            echo "==> Health check"
+            sleep 3
+            curl -sf http://localhost:3001/ || \
+              (echo "Health check failed"; docker logs --tail 50 service_booking; exit 1)
+
+            echo "==> Deployment complete"
