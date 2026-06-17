@@ -17,7 +17,7 @@ env:
   # ─────────────────
 jobs:
   build:
-    name: "Build — Docker image"
+    name: "Build Docker image"
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -72,7 +72,7 @@ jobs:
   # TESTS
   # ─────────────────
   tests:
-    name: "Tests — unit + coverage"
+    name: "Tests unit + coverage"
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -94,14 +94,14 @@ jobs:
       - name: Create results directory on the runner
         run: mkdir -p ${{ github.workspace }}/test-results
 
-      - name: Run tests — JUnit report
+      - name: Run tests JUnit report
         run: |
           docker run --rm \
             -v ${{ github.workspace }}/test-results:/app/test-results \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci-${{ github.sha }} \
             sh -c "mkdir -p /app/test-results && bun run test:ci"
 
-      - name: Run tests — coverage summary
+      - name: Run tests coverage summary
         run: |
           docker run --rm \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci-${{ github.sha }} \
@@ -127,7 +127,7 @@ jobs:
   # QUALITY
   # ─────────────────
   quality:
-    name: "Quality — Biome lint & format"
+    name: "Quality Biome lint & format"
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -152,7 +152,7 @@ jobs:
   # Cette étape n'a pas pu être testé car je n'avais pas de serveur pour faire le déploiement.
   # ─────────────────
   deploy:
-    name: "Deploy — production"
+    name: "Deploy production"
     needs: [tests, quality]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
