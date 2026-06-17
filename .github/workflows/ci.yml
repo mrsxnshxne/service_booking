@@ -10,14 +10,10 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Job 1 — BUILD
-# Builds two Docker images from the multi-stage Dockerfile:
-#   • ci      → stage "ci"     (source + deps + tests) — used by job 2
-#   • latest  → stage "runner" (minimal production image)
-# Images are pushed to the GitHub Container Registry (GHCR) and cached with
-# the GitHub Actions cache backend to speed up subsequent runs.
-# ──────────────────────────────────────────────────────────────────────────────
+
+  # ─────────────────
+  # BUILD
+  # ─────────────────
 jobs:
   build:
     name: "Build — Docker image"
@@ -70,14 +66,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Job 2 — TESTS
-  # Runs the test suite inside the CI Docker image built in job 1.
-  # Two runs are performed:
-  #   1. JUnit XML reporter → uploaded as an artifact and rendered as a
-  #      GitHub check via dorny/test-reporter.
-  #   2. Coverage reporter  → text summary visible in the job logs.
-  # ────────────────────────────────────────────────────────────────────────────
+
+  # ─────────────────
+  # TESTS
+  # ─────────────────
   tests:
     name: "Tests — unit + coverage"
     needs: build
@@ -85,10 +77,9 @@ jobs:
     permissions:
       contents: read
       packages: read
-      checks: write  # required by dorny/test-reporter to create check runs
+      checks: write
 
     steps:
-      # dorny/test-reporter requires a git checkout to resolve source file paths.
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -102,8 +93,6 @@ jobs:
       - name: Create results directory on the runner
         run: mkdir -p ${{ github.workspace }}/test-results
 
-      # bun test --reporter=junit requires --reporter-outfile (cannot use stdout
-      # redirect). The directory is volume-mounted so the file lands on the runner.
       - name: Run tests — JUnit report
         run: |
           docker run --rm \
@@ -111,15 +100,12 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci-${{ github.sha }} \
             sh -c "mkdir -p /app/test-results && bun run test:ci"
 
-      # Second run to display coverage stats in the job log.
       - name: Run tests — coverage summary
         run: |
           docker run --rm \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci-${{ github.sha }} \
             bun test:coverage
 
-      # Always upload the artifact, even when tests fail, so the report is
-      # available for inspection.
       - name: Upload test results artifact
         uses: actions/upload-artifact@v4
         if: always()
@@ -127,23 +113,18 @@ jobs:
           name: test-results
           path: ${{ github.workspace }}/test-results/
 
-      # Renders the JUnit XML as a native GitHub check with per-test details.
       - name: Publish test report
-        uses: dorny/test-reporter@v1
+        uses: mikepenz/action-junit-report@v4
         if: always()
         with:
-          name: Unit Tests
-          path: ${{ github.workspace }}/test-results/junit.xml
-          reporter: java-junit
-          fail-on-error: true
+          report_paths: ${{ github.workspace }}/test-results/junit.xml
+          check_name: Unit Tests
+          fail_on_failure: true
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Job 3 — QUALITY
-  # Static analysis using Biome (linter + formatter).
-  # Runs directly on the runner (no Docker) for speed; the Biome binary is
-  # already declared as a dev dependency and installed via bun install.
-  # The --reporter=github flag emits ::error annotations visible inline in PRs.
-  # ────────────────────────────────────────────────────────────────────────────
+
+  # ─────────────────
+  # QUALITY
+  # ─────────────────
   quality:
     name: "Quality — Biome lint & format"
     runs-on: ubuntu-latest
@@ -165,20 +146,10 @@ jobs:
       - name: Biome CI check (lint + format)
         run: bun run lint:ci
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Job 4 — DEPLOY
-  # Runs only on direct pushes to main, after both tests and quality pass.
-  #
-  # Required GitHub secrets (Settings → Secrets → Actions):
-  #   DEPLOY_HOST      — server IP or hostname
-  #   DEPLOY_USER      — SSH username (e.g. deploy)
-  #   DEPLOY_SSH_KEY   — private SSH key (RSA/Ed25519); add the public key to
-  #                      ~/.ssh/authorized_keys on the server
-  #
-  # Required on the server:
-  #   - Docker installed and running
-  #   - /srv/resa/.env file with DATABASE_URL, STRIPE_* variables
-  # ────────────────────────────────────────────────────────────────────────────
+  # ─────────────────
+  # DEPLOY
+  # Cette étape n'a pas pu être testé car je n'avais pas de serveur pour faire le déploiement.
+  # ─────────────────
   deploy:
     name: "Deploy — production"
     needs: [tests, quality]
@@ -190,9 +161,6 @@ jobs:
       packages: read
 
     steps:
-      # Pass the image reference and a GHCR read token to the remote session
-      # via appleboy/ssh-action's `envs` mechanism so they are never echoed
-      # in plain text in the workflow logs.
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.0
         env:
