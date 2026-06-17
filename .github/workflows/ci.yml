@@ -104,6 +104,7 @@ jobs:
       - name: Run tests coverage summary
         run: |
           docker run --rm \
+            -v ${{ github.workspace }}/test-results:/app/coverage \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci-${{ github.sha }} \
             bun test:coverage
 
@@ -121,6 +122,14 @@ jobs:
           report_paths: ${{ github.workspace }}/test-results/junit.xml
           check_name: Unit Tests
           fail_on_failure: true
+
+      - name: Publish coverage report
+        uses: zgosalvez/github-actions-report-lcov@v4
+        if: always()
+        with:
+          coverage-files: ${{ github.workspace }}/test-results/lcov.info
+          minimum-coverage: 0
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
 
   # ─────────────────
