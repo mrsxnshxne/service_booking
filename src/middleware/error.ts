@@ -9,6 +9,7 @@ const DOMAIN_STATUS: Record<string, number> = {
 	booking_conflict: 409,
 	hold_slot_expired: 409,
 	invalid_payment_transition: 409,
+	payment_already_completed: 409,
 	no_applicable_rate: 422,
 	rate_overlap: 422,
 	invalid_date: 422,
