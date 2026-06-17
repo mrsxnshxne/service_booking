@@ -88,6 +88,10 @@ jobs:
       checks: write  # required by dorny/test-reporter to create check runs
 
     steps:
+      # dorny/test-reporter requires a git checkout to resolve source file paths.
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -98,15 +102,14 @@ jobs:
       - name: Create results directory on the runner
         run: mkdir -p ${{ github.workspace }}/test-results
 
-      # Run the test suite with the JUnit reporter.
-      # The results directory is mounted so the XML file is accessible on the
-      # runner after the container exits.
+      # bun test --reporter=junit requires --reporter-outfile (cannot use stdout
+      # redirect). The directory is volume-mounted so the file lands on the runner.
       - name: Run tests — JUnit report
         run: |
           docker run --rm \
             -v ${{ github.workspace }}/test-results:/app/test-results \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci-${{ github.sha }} \
-            sh -c "mkdir -p /app/test-results && bun test:ci > /app/test-results/junit.xml"
+            sh -c "mkdir -p /app/test-results && bun run test:ci"
 
       # Second run to display coverage stats in the job log.
       - name: Run tests — coverage summary
