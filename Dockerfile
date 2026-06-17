@@ -8,8 +8,11 @@ COPY package.json bun.lock ./
 COPY prisma ./prisma/
 COPY prisma.config.ts ./
 
+# DATABASE_URL is required by prisma.config.ts at load time even for
+# `prisma generate`, which never connects to the database. A placeholder
+# is enough to satisfy the config validator during the build.
 RUN bun install --frozen-lockfile && \
-    bunx prisma generate
+    DATABASE_URL=postgresql://build-placeholder bunx prisma generate
 
 # ── Stage 2 : ci ──────────────────────────────────────────────────────────────
 # Full source tree on top of deps — used by the GitHub Actions test job.
