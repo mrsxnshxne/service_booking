@@ -4,8 +4,8 @@ import { DomainError } from "../src/domain/errors";
 import {
 	assertNoBaseRateOverlap,
 	estimateStay,
-	rateForNight,
 	type RateInput,
+	rateForNight,
 	round2,
 	selectDiscount,
 } from "../src/domain/pricing";

@@ -1,21 +1,21 @@
 import { Router } from "express";
 import { z } from "zod";
-import { prisma } from "../db";
-import { gatewayAuth } from "../middleware/gateway-auth";
-import { validate } from "../middleware/validate";
-import { DomainError } from "../domain/errors";
-import {
-	computeAvailability,
-	canCreateHold,
-	removableManualBlocks,
-} from "../domain/availability";
-import { estimateStay } from "../domain/pricing";
 import type {
 	BlockedPeriod,
+	DiscountRule,
 	HoldSlot,
 	Rate,
-	DiscountRule,
 } from "../../generated/prisma/client";
+import { prisma } from "../db";
+import {
+	canCreateHold,
+	computeAvailability,
+	removableManualBlocks,
+} from "../domain/availability";
+import { DomainError } from "../domain/errors";
+import { estimateStay } from "../domain/pricing";
+import { gatewayAuth } from "../middleware/gateway-auth";
+import { validate } from "../middleware/validate";
 
 export const availabilityRouter = Router({ mergeParams: true });
 export const holdSlotsRouter = Router({ mergeParams: true });

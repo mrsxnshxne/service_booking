@@ -1,19 +1,19 @@
 import { Router } from "express";
 import Stripe from "stripe";
 import { z } from "zod";
-import { prisma } from "../db";
-import { gatewayAuth } from "../middleware/gateway-auth";
-import { validate } from "../middleware/validate";
-import { DomainError } from "../domain/errors";
-import { estimateStay } from "../domain/pricing";
-import { nbNights } from "../domain/dates";
 import type {
 	Booking,
 	Client,
-	Rate,
 	DiscountRule,
 	Prisma,
+	Rate,
 } from "../../generated/prisma/client";
+import { prisma } from "../db";
+import { nbNights } from "../domain/dates";
+import { DomainError } from "../domain/errors";
+import { estimateStay } from "../domain/pricing";
+import { gatewayAuth } from "../middleware/gateway-auth";
+import { validate } from "../middleware/validate";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "");
 
