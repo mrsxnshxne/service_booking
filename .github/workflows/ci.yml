@@ -123,6 +123,9 @@ jobs:
           check_name: Unit Tests
           fail_on_failure: true
 
+      - name: Install lcov
+        run: sudo apt-get install -y lcov
+
       - name: Publish coverage report
         uses: zgosalvez/github-actions-report-lcov@v4
         if: always()
