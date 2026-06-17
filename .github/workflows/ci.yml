@@ -1,0 +1,214 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Job 1 — BUILD
+# Builds two Docker images from the multi-stage Dockerfile:
+#   • ci      → stage "ci"     (source + deps + tests) — used by job 2
+#   • latest  → stage "runner" (minimal production image)
+# Images are pushed to the GitHub Container Registry (GHCR) and cached with
+# the GitHub Actions cache backend to speed up subsequent runs.
+# ──────────────────────────────────────────────────────────────────────────────
+jobs:
+  build:
+    name: "Build — Docker image"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push CI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ci
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata for production image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runner
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 2 — TESTS
+  # Runs the test suite inside the CI Docker image built in job 1.
+  # Two runs are performed:
+  #   1. JUnit XML reporter → uploaded as an artifact and rendered as a
+  #      GitHub check via dorny/test-reporter.
+  #   2. Coverage reporter  → text summary visible in the job logs.
+  # ────────────────────────────────────────────────────────────────────────────
+  tests:
+    name: "Tests — unit + coverage"
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      checks: write  # required by dorny/test-reporter to create check runs
+
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create results directory on the runner
+        run: mkdir -p ${{ github.workspace }}/test-results
+
+      # Run the test suite with the JUnit reporter.
+      # The results directory is mounted so the XML file is accessible on the
+      # runner after the container exits.
+      - name: Run tests — JUnit report
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/test-results:/app/test-results \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci-${{ github.sha }} \
+            sh -c "mkdir -p /app/test-results && bun test:ci > /app/test-results/junit.xml"
+
+      # Second run to display coverage stats in the job log.
+      - name: Run tests — coverage summary
+        run: |
+          docker run --rm \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci-${{ github.sha }} \
+            bun test:coverage
+
+      # Always upload the artifact, even when tests fail, so the report is
+      # available for inspection.
+      - name: Upload test results artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: ${{ github.workspace }}/test-results/
+
+      # Renders the JUnit XML as a native GitHub check with per-test details.
+      - name: Publish test report
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Unit Tests
+          path: ${{ github.workspace }}/test-results/junit.xml
+          reporter: java-junit
+          fail-on-error: true
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 3 — QUALITY
+  # Static analysis using Biome (linter + formatter).
+  # Runs directly on the runner (no Docker) for speed; the Biome binary is
+  # already declared as a dev dependency and installed via bun install.
+  # The --reporter=github flag emits ::error annotations visible inline in PRs.
+  # ────────────────────────────────────────────────────────────────────────────
+  quality:
+    name: "Quality — Biome lint & format"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Biome CI check (lint + format)
+        run: bun run lint:ci
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 4 — DEPLOY
+  # Runs only on direct pushes to main, after both tests and quality pass.
+  # In a real environment this would SSH into the server and run:
+  #   docker pull <image> && docker-compose up -d
+  # Here it is simulated so the pipeline is complete without a target server.
+  # ────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: "Deploy — production (simulated)"
+    needs: [tests, quality]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Simulate deployment to production server
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+        run: |
+          echo "=============================================="
+          echo "  DEPLOYMENT — SIMULATION"
+          echo "=============================================="
+          echo ""
+          echo "  Commit  : ${{ github.sha }}"
+          echo "  Branch  : ${{ github.ref_name }}"
+          echo "  Image   : $IMAGE"
+          echo ""
+          echo "  Commands that would run on the server:"
+          echo ""
+          echo "    ssh deploy@prod-server \\"
+          echo "      'docker pull $IMAGE && \\"
+          echo "       docker-compose -f /srv/resa/docker-compose.yml \\"
+          echo "         up -d --no-deps service_booking && \\"
+          echo "       docker image prune -f'"
+          echo ""
+          echo "  Health-check (simulated):"
+          echo "    curl -sf http://prod-server:3001/health → 200 OK"
+          echo ""
+          echo "  Deployment successful (simulated)"
+          echo "=============================================="
