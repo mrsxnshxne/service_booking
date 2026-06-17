@@ -126,13 +126,23 @@ jobs:
       - name: Install lcov
         run: sudo apt-get install -y lcov
 
-      - name: Publish coverage report
-        uses: zgosalvez/github-actions-report-lcov@v4
+      - name: Publish coverage summary
         if: always()
-        with:
-          coverage-files: ${{ github.workspace }}/test-results/lcov.info
-          minimum-coverage: 0
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LCOV_FILE="${{ github.workspace }}/test-results/lcov.info"
+          if [ ! -f "$LCOV_FILE" ]; then
+            echo "## Coverage" >> $GITHUB_STEP_SUMMARY
+            echo ":warning: lcov.info not found" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          SUMMARY=$(lcov --summary "$LCOV_FILE" 2>&1)
+          LINES=$(echo "$SUMMARY" | grep "lines" | awk '{print $2}')
+          FUNCS=$(echo "$SUMMARY" | grep "functions" | awk '{print $2}')
+          echo "## Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lines | $LINES |" >> $GITHUB_STEP_SUMMARY
+          echo "| Functions | $FUNCS |" >> $GITHUB_STEP_SUMMARY
 
 
   # ─────────────────
