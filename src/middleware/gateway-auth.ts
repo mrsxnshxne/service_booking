@@ -1,4 +1,4 @@
-import type { NextFunction, Request, Response } from "express"
+import type { NextFunction, Request, Response } from "express";
 
 /**
  * The gateway authenticates the manager (better-auth) and forwards their id
@@ -6,11 +6,13 @@ import type { NextFunction, Request, Response } from "express"
  * (localhost / internal docker network) — it trusts this header.
  */
 export function gatewayAuth(req: Request, res: Response, next: NextFunction) {
-	const managerId = req.header("x-manager-id")
+	const managerId = req.header("x-manager-id");
 	if (!managerId) {
-		res.status(401).json({ code: "unauthorized", message: "Authentication required" })
-		return
+		res
+			.status(401)
+			.json({ code: "unauthorized", message: "Authentication required" });
+		return;
 	}
-	req.managerId = managerId
-	next()
+	req.managerId = managerId;
+	next();
 }

@@ -10,7 +10,9 @@ import {
 	selectDiscount,
 } from "../src/domain/pricing";
 
-function rate(partial: Partial<RateInput> & Pick<RateInput, "start_date" | "end_date">): RateInput {
+function rate(
+	partial: Partial<RateInput> & Pick<RateInput, "start_date" | "end_date">,
+): RateInput {
 	return {
 		id: partial.id ?? crypto.randomUUID(),
 		name: partial.name ?? "Base",
@@ -47,8 +49,12 @@ describe("dates", () => {
 	});
 
 	test("overlaps is end-exclusive: back-to-back ranges do not overlap", () => {
-		expect(overlaps("2026-07-01", "2026-07-05", "2026-07-05", "2026-07-10")).toBe(false);
-		expect(overlaps("2026-07-01", "2026-07-06", "2026-07-05", "2026-07-10")).toBe(true);
+		expect(
+			overlaps("2026-07-01", "2026-07-05", "2026-07-05", "2026-07-10"),
+		).toBe(false);
+		expect(
+			overlaps("2026-07-01", "2026-07-06", "2026-07-05", "2026-07-10"),
+		).toBe(true);
 	});
 });
 
@@ -108,7 +114,9 @@ describe("selectDiscount", () => {
 	});
 
 	test("max_nights null is open-ended", () => {
-		const rules = [{ min_nights: 7, max_nights: null, discount_percentage: 10 }];
+		const rules = [
+			{ min_nights: 7, max_nights: null, discount_percentage: 10 },
+		];
 		expect(selectDiscount(rules, 365)?.discount_percentage).toBe(10);
 	});
 });
@@ -136,7 +144,11 @@ describe("estimateStay", () => {
 
 	test("stay spanning base and high season prices each night separately", () => {
 		// 2 nights at 80 (06-29, 06-30) + 2 nights at 120 (07-01, 07-02)
-		const estimate = estimateStay([base, highSeason], "2026-06-29", "2026-07-03");
+		const estimate = estimateStay(
+			[base, highSeason],
+			"2026-06-29",
+			"2026-07-03",
+		);
 		expect(estimate.base_amount).toBe(400);
 	});
 
@@ -170,9 +182,9 @@ describe("estimateStay", () => {
 	});
 
 	test("throws no_applicable_rate when a night is uncovered", () => {
-		expect(() => estimateStay([highSeason], "2026-07-30", "2026-08-02")).toThrow(
-			/No rate covers the night of 2026-08-01/,
-		);
+		expect(() =>
+			estimateStay([highSeason], "2026-07-30", "2026-08-02"),
+		).toThrow(/No rate covers the night of 2026-08-01/);
 	});
 
 	test("amounts are rounded to cents", () => {
@@ -201,7 +213,11 @@ describe("assertNoBaseRateOverlap", () => {
 	test("rejects two overlapping non-high-season rates", () => {
 		expect(() =>
 			assertNoBaseRateOverlap(
-				{ start_date: "2026-06-15", end_date: "2026-07-15", is_high_season: false },
+				{
+					start_date: "2026-06-15",
+					end_date: "2026-07-15",
+					is_high_season: false,
+				},
 				[existingBase],
 			),
 		).toThrow(/must not overlap/);
@@ -210,7 +226,11 @@ describe("assertNoBaseRateOverlap", () => {
 	test("allows a high-season rate overlapping a base rate", () => {
 		expect(() =>
 			assertNoBaseRateOverlap(
-				{ start_date: "2026-06-15", end_date: "2026-07-15", is_high_season: true },
+				{
+					start_date: "2026-06-15",
+					end_date: "2026-07-15",
+					is_high_season: true,
+				},
 				[existingBase],
 			),
 		).not.toThrow();
@@ -219,7 +239,11 @@ describe("assertNoBaseRateOverlap", () => {
 	test("allows back-to-back base rates (end-exclusive)", () => {
 		expect(() =>
 			assertNoBaseRateOverlap(
-				{ start_date: "2026-07-01", end_date: "2026-08-01", is_high_season: false },
+				{
+					start_date: "2026-07-01",
+					end_date: "2026-08-01",
+					is_high_season: false,
+				},
 				[existingBase],
 			),
 		).not.toThrow();

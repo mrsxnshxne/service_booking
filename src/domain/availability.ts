@@ -47,9 +47,7 @@ export function computeAvailability(
 ): DayAvailability[] {
 	const activeHolds = holds.filter((h) => isHoldActive(h, now));
 	return eachNight(startDate, endDate).map((date) => {
-		const block = blocks.find(
-			(b) => b.start_date <= date && date < b.end_date,
-		);
+		const block = blocks.find((b) => b.start_date <= date && date < b.end_date);
 		if (block) return { date, blocked: true, source: block.source };
 		const held = activeHolds.some(
 			(h) => h.start_date <= date && date < h.end_date,

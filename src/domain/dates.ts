@@ -42,7 +42,8 @@ export function nbNights(checkIn: string, checkOut: string): number {
 			`check_out (${checkOut}) must be after check_in (${checkIn})`,
 		);
 	}
-	const ms = Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`);
+	const ms =
+		Date.parse(`${checkOut}T00:00:00Z`) - Date.parse(`${checkIn}T00:00:00Z`);
 	return Math.round(ms / 86_400_000);
 }
 

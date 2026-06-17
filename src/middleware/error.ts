@@ -1,6 +1,6 @@
-import type { NextFunction, Request, Response } from "express"
-import { ZodError } from "zod"
-import { DomainError } from "../domain/errors"
+import type { NextFunction, Request, Response } from "express";
+import { ZodError } from "zod";
+import { DomainError } from "../domain/errors";
 
 const DOMAIN_STATUS: Record<string, number> = {
 	not_found: 404,
@@ -15,13 +15,18 @@ const DOMAIN_STATUS: Record<string, number> = {
 	invalid_date: 422,
 	invalid_date_range: 422,
 	validation_error: 422,
-}
+};
 
-export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
+export function errorHandler(
+	err: unknown,
+	_req: Request,
+	res: Response,
+	_next: NextFunction,
+) {
 	if (err instanceof DomainError) {
-		const status = DOMAIN_STATUS[err.code] ?? 500
-		res.status(status).json({ code: err.code, message: err.message })
-		return
+		const status = DOMAIN_STATUS[err.code] ?? 500;
+		res.status(status).json({ code: err.code, message: err.message });
+		return;
 	}
 
 	if (err instanceof ZodError) {
@@ -32,10 +37,12 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
 				field: issue.path.join("."),
 				message: issue.message,
 			})),
-		})
-		return
+		});
+		return;
 	}
 
-	console.error(err)
-	res.status(500).json({ code: "internal_error", message: "An unexpected error occurred" })
+	console.error(err);
+	res
+		.status(500)
+		.json({ code: "internal_error", message: "An unexpected error occurred" });
 }

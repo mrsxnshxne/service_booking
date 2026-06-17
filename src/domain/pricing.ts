@@ -50,7 +50,10 @@ export function round2(value: number): number {
 }
 
 /** Rate applicable to one night: high season wins over base rates. */
-export function rateForNight(rates: RateInput[], night: string): RateInput | undefined {
+export function rateForNight(
+	rates: RateInput[],
+	night: string,
+): RateInput | undefined {
 	const covering = rates.filter(
 		(r) => r.start_date <= night && night < r.end_date,
 	);
@@ -140,7 +143,12 @@ export function assertNoBaseRateOverlap(
 	const conflict = existing.find(
 		(r) =>
 			!r.is_high_season &&
-			overlaps(candidate.start_date, candidate.end_date, r.start_date, r.end_date),
+			overlaps(
+				candidate.start_date,
+				candidate.end_date,
+				r.start_date,
+				r.end_date,
+			),
 	);
 	if (conflict) {
 		throw new DomainError(
